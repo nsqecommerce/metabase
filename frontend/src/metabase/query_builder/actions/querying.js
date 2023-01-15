@@ -145,7 +145,7 @@ export const runQuestionQuery = ({
       })
       .catch(error => dispatch(queryErrored(startTime, error)));
 
-    dispatch.action(RUN_QUERY, { cancelQueryDeferred });
+    dispatch({ type: RUN_QUERY, payload: { cancelQueryDeferred } });
   };
 };
 
@@ -210,10 +210,13 @@ export const queryCompleted = (question, queryResults) => {
       ? preserveModelMetadata(queryResults, originalQuestion)
       : undefined;
 
-    dispatch.action(QUERY_COMPLETED, {
-      card,
-      queryResults,
-      modelMetadata,
+    dispatch({
+      type: QUERY_COMPLETED,
+      payload: {
+        card,
+        queryResults,
+        modelMetadata,
+      },
     });
     dispatch(loadCompleteUIControls());
   };
