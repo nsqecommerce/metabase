@@ -1334,8 +1334,8 @@ class QuestionInner {
         this._cljsCard(),
         this.query().clean().datasetQuery(),
       );
-      const thisParams = C.parameter_values_to_js(this._parameterValues);
-      const origParams = C.parameter_values_to_js(
+      const thisParams = C.parameter_values_from_js(this._parameterValues);
+      const origParams = C.parameter_values_from_js(
         originalQuestion._parameterValues,
       );
       return C.is_dirty_compared_to(thisCard, thisParams, origCard, origParams);

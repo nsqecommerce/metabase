@@ -172,9 +172,10 @@
                                        (not should-unlock?))))))
 
 #?(:cljs
-   (def ^:export parameter_values_to_js
+   (def ^:export parameter_values_from_js
      "Converts a ParameterValues object into CLJS data."
      (converters/incoming ParameterValues)))
+
 
 (mu/defn ^:export is-dirty-compared-to :- boolean?
   "Given two cards, compare a subset of their properties to see if they're different."
