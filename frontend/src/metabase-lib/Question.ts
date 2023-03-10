@@ -113,6 +113,29 @@ export type QuestionCreatorOpts = {
 type CljsCard = unknown & { _opaque: typeof CljsCard };
 declare const CljsCard: unique symbol;
 
+function noBlanks(obj) {
+  if (Array.isArray(obj)) {
+    return obj.map(noBlanks);
+  }
+  if (!obj || typeof obj !== "object") {
+    return obj;
+  }
+
+  const ret = {};
+  for (const k of Object.keys(obj)) {
+    const v = obj[k];
+    if (typeof v !== "undefined" && v !== null) {
+      // Special case: Recursively de-blank dataset_query and dataset_query.query.
+      if (k === "dataset_query" && obj[k].query) {
+        ret[k] = { ...obj[k], query: noBlanks(obj[k].query) };
+      } else {
+        ret[k] = obj[k];
+      }
+    }
+  }
+  return ret;
+}
+
 /**
  * This is a wrapper around a question/card object, which may contain one or more Query objects
  */
@@ -197,6 +220,15 @@ class QuestionInner {
         );
       }
       this._cljsCardCached = C.from_js(this._card, this.metadata());
+      // TODO: Remove this dev-time check, eventually. It's a useful debugging aid during this transition.
+      const roundTripped = C.to_js(this._cljsCardCached);
+      const deblanked = noBlanks(this._card);
+      if (!_.isEqual(deblanked, roundTripped)) {
+        console.log(deblanked, roundTripped);
+        throw new Error(
+          "round-tripped Question._card is not the same as the original",
+        );
+      }
     }
     return this._cljsCardCached;
   }
@@ -1287,22 +1319,26 @@ class QuestionInner {
 
   // predicate function that dermines if the question is "dirty" compared to the given question
   isDirtyComparedTo(originalQuestion: Question) {
-    if (!this.isSaved() && this.canRun() && originalQuestion == null) {
+    if (!this.isSaved() && this.canRun() && !originalQuestion) {
       // if it's new, then it's dirty if it is runnable
+      return true;
+    } else if (!originalQuestion) {
       return true;
     } else {
       // if it's saved, then it's dirty when the current card doesn't match the last saved version
-      const origCardSerialized =
-        originalQuestion &&
-        originalQuestion._serializeForUrl({
-          includeOriginalCardId: false,
-        });
-
-      const currentCardSerialized = this._serializeForUrl({
-        includeOriginalCardId: false,
-      });
-
-      return currentCardSerialized !== origCardSerialized;
+      const origCard = C.with_dataset_query(
+        originalQuestion._cljsCard(),
+        originalQuestion.query().clean().datasetQuery(),
+      );
+      const thisCard = C.with_dataset_query(
+        this._cljsCard(),
+        this.query().clean().datasetQuery(),
+      );
+      const thisParams = C.parameter_values_to_js(this._parameterValues);
+      const origParams = C.parameter_values_to_js(
+        originalQuestion._parameterValues,
+      );
+      return C.is_dirty_compared_to(thisCard, thisParams, origCard, origParams);
     }
   }
 

@@ -7,75 +7,22 @@
    #?@(:cljs ([metabase.domain-entities.converters :as converters]
               [metabase.lib.metadata.frontend :as lib.metadata.frontend]
               [metabase.lib.query :as lib.query]
-              [metabase.lib.util :as lib.util]))))
+              [metabase.lib.util :as lib.util]
+              [metabase.mbql.normalize :as mbql.normalize]))))
 
-;;; ---------------------------------- Schemas for legacy MBQL -----------------------------------
-;;; The JS side provides and expects the classic MBQL format. These Legacy* schemas are for that
-;;; format, which we use to convert in both directions.
-;;; See [[incoming-query]] and [[outgoing-query]].
-#?(:cljs
-   (def ^:private LegacyNativeQuery
-     [:map
-      [:query string?]
-      [:template-tags {:optional true :js/prop "template-tags"}
-       [:map-of string? :any]]]))
-
-#?(:cljs
-   (def ^:private LegacyAggregation
-     [:tuple [:= "count"]]))
-
-#?(:cljs
-   (def ^:private LegacyFieldReference
-     [:tuple
-      [:enum :field]
-      :metabase.lib.schema.id/field
-      [:or
-       [:map [:source-field {:js/prop "source-field"} [:or :metabase.lib.schema.id/field string?]]]
-       [:map-of string? :any]
-       :nil]]))
-
-#?(:cljs
-   (def ^:private LegacyExpression
-     [:catn
-      [:tag [:enum := :!= :< :> :<= :>= :not :and :or :+ :- :* (keyword "/")]] ;; TODO: That's not a complete list.
-      [:args [:+ [:or string? number? LegacyFieldReference]]]]))
-
-#?(:cljs
-   (def ^:private LegacyStructuredQuery
-     [:schema
-      {:registry {::query [:map
-                           [:source-table {:optional true :js/prop "source-table"}
-                            number?]
-                           [:source-query {:optional true :js/prop "source-query"}
-                            [:ref ::query]]
-                           [:aggregation {:optional true} [:sequential LegacyAggregation]]
-                           [:breakout    {:optional true} [:sequential LegacyFieldReference]]
-                           [:filter      {:optional true} LegacyExpression]
-                           ;; TODO: Lots more fields to fill in here.
-                           ]}}
-      [:ref ::query]]))
-
-#?(:cljs
-   (def ^:private LegacyDatasetQuery
-     [:map
-      [:type [:enum :native :query]]
-      [:database {:optional true} :metabase.lib.schema.id/database]
-      [:native {:optional true} LegacyNativeQuery]
-      [:query {:optional true} LegacyStructuredQuery]
-      [:parameters {:optional true} [:sequential :any]]]))
+;;; ------------------------------- JS<->CLJS conversion helpers ---------------------------------
 #?(:cljs
    (def ^:private ^:dynamic *metadata-provider* nil))
 
 (def ^:private incoming-query
-  #?(:cljs (let [->LegacyDatasetQuery (converters/incoming LegacyDatasetQuery)]
-             (fn [js-legacy-query]
-               (let [legacy-query (->LegacyDatasetQuery js-legacy-query)]
-                 (lib.query/query *metadata-provider* legacy-query))))
+  #?(:cljs #(->> (if (object? %) (js->clj %) %)
+                 js->clj
+                 mbql.normalize/normalize
+                 (lib.query/query *metadata-provider*))
      :clj  identity))
 
 (def ^:private outgoing-query
-  #?(:cljs (let [LegacyDatasetQuery-> (converters/outgoing LegacyDatasetQuery)]
-             #(-> % lib.util/depipeline LegacyDatasetQuery->))
+  #?(:cljs #(-> % lib.util/depipeline clj->js)
      :clj  identity))
 
 ;;; ----------------------------------- Schemas for Card -----------------------------------------
@@ -98,52 +45,84 @@
    [:is-multi-select {:optional true :js/prop "isMultiSelect"} boolean?]
    [:value {:optional true} :any]])
 
+(def Scalar
+  [:or number? string? boolean? nil?])
+
+(def ParameterValue
+  "Malli schema for a single parameter's value. Part of [[ParameterValues]].
+  Yes, this is a one-element tuple."
+  [:tuple Scalar])
+
+(def ParameterValues
+  "Malli schema for the set of parameter values for a Card. This is not a key on Card; it's stored separately."
+  [:map
+   [:values [:sequential ParameterValue]]
+   [:has_more_values {:optional true} boolean?]])
+
 (def Card
   "Malli schema for a possibly-saved Card."
   [:map
+   [:archived {:optional true} boolean?]
+   [:average_query_time {:optional true} number?]
+   [:cache-ttl {:optional true} [:maybe number?]]
+   [:can_write {:optional true} boolean?]
+   [:collection {:optional true} :any]
+   [:collection_id {:optional true} [:maybe number?]]
+   [:collection_position {:optional true} [:maybe number?]]
+   [:collection_preview {:optional true} boolean?]
+   [:created_at {:optional true} string?] ;; TODO: Date regex?
+   [:creator {:optional true}
+    [:map
+     [:id number?]
+     [:common_name string?]
+     [:date_joined string?] ;; TODO: Date regex
+     [:email string?]
+     [:first_name  [:maybe string?]]
+     [:is_qbnewb boolean?]
+     [:is_superuser boolean?]
+     [:last_login string?] ;; TODO: Date regex
+     [:last_name   [:maybe string?]]]]
+   [:creator_id {:optional true} number?]
+   [:creation-type {:optional true :js/prop "creationType"} string?]
+   [:dashboard-count {:optional true} number?]
+   [:dashboard-id {:optional true :js/prop "dashboardId"} number?]
+   [:dashcard-id  {:optional true :js/prop "dashcardId"}  number?]
+   [:database_id {:optional true} number?]
+   [:dataset {:optional true} boolean?]
    [:dataset_query
     ;; Custom encoding and decoding for :dataset-query to convert JS legacy MBQL <-> CLJS pMBQL.
     {:decode/js incoming-query
      :encode/js outgoing-query}
     ::lib.schema/query]
+   [:description {:optional true} [:maybe string?]]
    ;; TODO: Display is really an enum but I don't know all its values.
    ;; Known values: table, scalar, gauge, map, area, bar, line. There are more missing for sure.
    [:display string?]
-   [:visualization_settings VisualizationSettings]
-   [:parameters {:optional true} [:sequential Parameter]]
-   [:dashboard-id {:optional true :js/prop "dashboardId"} number?]
-   [:dashcard-id  {:optional true :js/prop "dashcardId"}  number?]
-   [:original_card_id {:optional true} number?]
-   [:persisted {:optional true} boolean?]
+   [:display-is-locked {:optional true :js/prop "displayIsLocked"} boolean?]
+   [:embedding_params {:optional true} :any]
+   [:enable_embedding {:optional true} boolean?]
+   [:entity_id {:optional true} string?]
+   [:id {:optional true} [:or number? string?]]
    [:last-edit-info {:optional true :js/prop "last-edit-info"} :any]
    [:last-query-start {:optional true} :any]
-   [:moderation-reviews {:optional true} [:vector :any]]
-   [:id {:optional true} [:or number? string?]]
+   [:made_public_by_id {:optional true} number?]
+   [:moderation_reviews {:optional true} [:vector :any]]
    [:name {:optional true} string?]
-   [:description {:optional true} [:maybe string?]]
-   [:dataset {:optional true} boolean?]
-   [:can-write {:optional true} boolean?]
-   [:creation-type {:optional true :js/prop "creationType"} string?]
-   [:public-uuid {:optional true} string?]
-   [:cache-ttl {:optional true} [:maybe number?]]
-   [:archived {:optional true} boolean?]
-   [:collection_id {:optional true} [:maybe number?]]
-   [:collection_position {:optional true} [:maybe number?]]
-   [:display-is-locked {:optional true :js/prop "displayIsLocked"} boolean?]
-   [:parameter-usage-count {:optional true} number?]
+   [:original_card_id {:optional true} number?]
+   [:parameter_mappings {:optional true} [:vector :any]]
+   [:parameter_usage_count {:optional true} number?]
+   [:parameters {:optional true} [:sequential Parameter]]
+   [:persisted {:optional true} boolean?]
+   [:public_uuid {:optional true} string?]
+   [:query_type {:optional true} string?] ;; TODO: Probably an enum
    [:result_metadata {:optional true} :any]
-   [:creator {:optional true}
-    [:map
-     [:id number?]
-     [:common_name string?]
-     [:first_name  [:maybe string?]]
-     [:last_name   [:maybe string?]]
-     [:email string?]
-     [:last_login string?]
-     [:date_joined string?]]]])
+   [:table_id {:optional true} number?]
+   [:updated_at {:optional true} string?] ;; TODO: Date regex
+   [:visualization_settings VisualizationSettings]])
 
 ;;; ---------------------------------------- Exported API ----------------------------------------
 (de/define-getters-and-setters Card
+  dataset-query     [:dataset_query]
   display           [:display]
   display-is-locked [:display-is-locked])
 
@@ -191,3 +170,17 @@
          should-unlock?      (and formerly-sensible? (not currently-sensible?))]
      (with-display-is-locked card (and (display-is-locked card)
                                        (not should-unlock?))))))
+
+#?(:cljs
+   (def ^:export parameter_values_to_js
+     "Converts a ParameterValues object into CLJS data."
+     (converters/incoming ParameterValues)))
+
+(mu/defn ^:export is-dirty-compared-to :- boolean?
+  "Given two cards, compare a subset of their properties to see if they're different."
+  [card          :- Card param-values :- ParameterValues
+   original-card :- Card original-param-values :- ParameterValues]
+  (or (not= param-values original-param-values)
+      (apply not= (for [c [card original-card]]
+                    (select-keys c [:name :description :collection_id :dashboard_id :dashcard_id
+                                    :dataset :dataset_query :display :parameters :visualization_settings])))))
