@@ -1319,27 +1319,40 @@ class QuestionInner {
 
   // predicate function that dermines if the question is "dirty" compared to the given question
   isDirtyComparedTo(originalQuestion: Question) {
-    if (!this.isSaved() && this.canRun() && !originalQuestion) {
-      // if it's new, then it's dirty if it is runnable
-      return true;
-    } else if (!originalQuestion) {
-      return true;
-    } else {
-      // if it's saved, then it's dirty when the current card doesn't match the last saved version
-      const origCard = C.with_dataset_query(
-        originalQuestion._cljsCard(),
-        originalQuestion.query().clean().datasetQuery(),
-      );
-      const thisCard = C.with_dataset_query(
-        this._cljsCard(),
-        this.query().clean().datasetQuery(),
-      );
-      const thisParams = C.parameter_values_from_js(this._parameterValues);
-      const origParams = C.parameter_values_from_js(
-        originalQuestion._parameterValues,
-      );
-      return C.is_dirty_compared_to(thisCard, thisParams, origCard, origParams);
+    const ret = (() => {
+      if (!this.isSaved() && this.canRun() && !originalQuestion) {
+        // if it's new, then it's dirty if it is runnable
+        return true;
+      } else if (!originalQuestion) {
+        return true;
+      } else {
+        // if it's saved, then it's dirty when the current card doesn't match the last saved version
+        const origCard = C.with_dataset_query(
+          originalQuestion._cljsCard(),
+          originalQuestion.query().clean().datasetQuery(),
+        );
+        const thisCard = C.with_dataset_query(
+          this._cljsCard(),
+          this.query().clean().datasetQuery(),
+        );
+        const thisParams = C.parameter_values_from_js(this._parameterValues);
+        const origParams = C.parameter_values_from_js(
+          originalQuestion._parameterValues,
+        );
+        return C.is_dirty_compared_to(
+          thisCard,
+          thisParams,
+          origCard,
+          origParams,
+        );
+      }
+    })();
+    if (!window._dirtyChecks) {
+      window._dirtyChecks = [];
     }
+    window._dirtyChecks.push([this.card(), originalQuestion.card(), ret]);
+    console.log(window._dirtyChecks);
+    return ret;
   }
 
   isDirtyComparedToWithoutParameters(originalQuestion: Question) {
