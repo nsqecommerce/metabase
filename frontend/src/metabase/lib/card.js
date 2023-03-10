@@ -57,14 +57,6 @@ function getCleanCard(card) {
   };
 }
 
-export function isEqualCard(card1, card2) {
-  if (card1 && card2) {
-    return Utils.equals(getCleanCard(card1), getCleanCard(card2));
-  } else {
-    return false;
-  }
-}
-
 // TODO Atte Keinänen 5/31/17 Deprecated, we should move tests to Questions.spec.js
 export function serializeCardForUrl(card) {
   return utf8_to_b64url(JSON.stringify(getCleanCard(card)));

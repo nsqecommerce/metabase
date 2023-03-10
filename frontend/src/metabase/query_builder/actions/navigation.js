@@ -5,8 +5,6 @@ import { push, replace } from "react-router-redux";
 import { createThunkAction } from "metabase/lib/redux";
 import Utils from "metabase/lib/utils";
 
-import { isEqualCard } from "metabase/lib/card";
-
 import { isAdHocModelQuestion } from "metabase-lib/metadata/utils/models";
 import {
   getCard,
@@ -175,7 +173,8 @@ export const updateUrl = createThunkAction(
         (locationDescriptor.search || "") === (window.location.search || "") &&
         (locationDescriptor.hash || "") === (window.location.hash || "");
       const isSameCard =
-        currentState && isEqualCard(currentState.card, newState.card);
+        currentState?.card &&
+        question.setCard(currentState.card).isDirtyComparedTo(question);
       const isSameMode =
         getQueryBuilderModeFromLocation(locationDescriptor).mode ===
         getQueryBuilderModeFromLocation(window.location).mode;
