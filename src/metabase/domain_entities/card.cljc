@@ -2,6 +2,7 @@
   "Functions for building, updating and querying Cards (that is, Metabase questions)."
   (:require
    [metabase.domain-entities.malli :as de]
+   [metabase.lib.equality :as lib.equality]
    [metabase.lib.schema :as lib.schema]
    [metabase.util.malli :as mu]
    #?@(:cljs ([metabase.domain-entities.converters :as converters]
@@ -30,22 +31,53 @@
   "Malli schema for `visualization_settings` - a map of strings to opaque JS values."
   [:map-of string? :any])
 
+(def LocalFieldReference
+  "Malli schema for a *legacy* field clause for a local field."
+  [:tuple
+   [:= :field]
+   number?
+   [:maybe [:map-of string? :any]]])
+
+(def ForeignFieldReference
+  "Malli schema for a *legacy* field clause for a foreign field."
+  [:tuple
+   [:= :field]
+   [:or number? string?]
+   [:map [:source-field {:js/prop "source-field"} [:or number? string?]]]])
+
+(def VariableTarget
+  "Malli schema for a parameter that references a template variable."
+  [:tuple [:= :template-tag] string?])
+
+(def ParameterTarget
+  "Malli schema for a parameter's target field."
+  [:orn
+   [:variable [:tuple [:= :variable] VariableTarget]]
+   [:dimension [:tuple
+                [:= :dimension]
+                [:or LocalFieldReference ForeignFieldReference VariableTarget]]]])
+
 (def Parameter
   "Malli schema for each Card.parameters value."
   [:map
    [:id string?]
    [:name string?]
    [:display-name {:optional true :js/prop "display-name"} string?]
-   [:type string?]
    [:slug string?]
+   [:type string?]
    [:sectionId {:optional true :js-prep "sectionId"} string?]
    [:default {:optional true} :any]
-   [:required {:optional true} boolean?]
    [:filtering-parameters {:optional true :js/prop "filteringParameters"} [:vector string?]]
    [:is-multi-select {:optional true :js/prop "isMultiSelect"} boolean?]
-   [:value {:optional true} :any]])
+   [:required {:optional true} boolean?]
+   [:target {:optional true} ParameterTarget]
+   [:value {:optional true} :any]
+   [:values_query_type {:optional true} :any]
+   [:values_source_config {:optional true} :any]
+   [:values_source_type {:optional true} :any]])
 
 (def Scalar
+  "JSON scalar values - the set of values a question parameter can take on."
   [:or number? string? boolean? nil?])
 
 (def ParameterValue
@@ -59,6 +91,13 @@
    [:values [:sequential ParameterValue]]
    [:has_more_values {:optional true} boolean?]])
 
+(def DatasetQuery
+  "Wraps `::lib.schema/query` with extra conversion logic."
+  ;; Custom encoding and decoding for :dataset-query to convert JS legacy MBQL <-> CLJS pMBQL.
+  [:ref {:decode/js incoming-query
+         :encode/js outgoing-query}
+   ::lib.schema/query])
+
 (def Card
   "Malli schema for a possibly-saved Card."
   [:map
@@ -67,10 +106,10 @@
    [:cache-ttl {:optional true} [:maybe number?]]
    [:can_write {:optional true} boolean?]
    [:collection {:optional true} :any]
-   [:collection_id {:optional true} [:maybe number?]]
-   [:collection_position {:optional true} [:maybe number?]]
-   [:collection_preview {:optional true} boolean?]
-   [:created_at {:optional true} string?] ;; TODO: Date regex?
+   [:collection_id [:maybe number?]]
+   [:collection_position [:maybe number?]]
+   [:collection_preview boolean?]
+   [:created_at [:maybe string?]] ;; TODO: Date regex?
    [:creator {:optional true}
     [:map
      [:id number?]
@@ -84,17 +123,13 @@
      [:last_name   [:maybe string?]]]]
    [:creator_id {:optional true} number?]
    [:creation-type {:optional true :js/prop "creationType"} string?]
-   [:dashboard-count {:optional true} number?]
+   [:dashboard_count {:optional true} number?]
    [:dashboard-id {:optional true :js/prop "dashboardId"} number?]
    [:dashcard-id  {:optional true :js/prop "dashcardId"}  number?]
    [:database_id {:optional true} number?]
    [:dataset {:optional true} boolean?]
-   [:dataset_query
-    ;; Custom encoding and decoding for :dataset-query to convert JS legacy MBQL <-> CLJS pMBQL.
-    {:decode/js incoming-query
-     :encode/js outgoing-query}
-    ::lib.schema/query]
-   [:description {:optional true} [:maybe string?]]
+   [:dataset_query DatasetQuery]
+   [:description [:maybe string?]]
    ;; TODO: Display is really an enum but I don't know all its values.
    ;; Known values: table, scalar, gauge, map, area, bar, line. There are more missing for sure.
    [:display string?]
@@ -105,7 +140,7 @@
    [:id {:optional true} [:or number? string?]]
    [:last-edit-info {:optional true :js/prop "last-edit-info"} :any]
    [:last-query-start {:optional true} :any]
-   [:made_public_by_id {:optional true} number?]
+   [:made_public_by_id {:optional true} [:maybe number?]]
    [:moderation_reviews {:optional true} [:vector :any]]
    [:name {:optional true} string?]
    [:original_card_id {:optional true} number?]
@@ -113,16 +148,16 @@
    [:parameter_usage_count {:optional true} number?]
    [:parameters {:optional true} [:sequential Parameter]]
    [:persisted {:optional true} boolean?]
-   [:public_uuid {:optional true} string?]
+   [:public_uuid {:optional true} [:maybe string?]]
    [:query_type {:optional true} string?] ;; TODO: Probably an enum
    [:result_metadata {:optional true} :any]
-   [:table_id {:optional true} number?]
+   [:table_id {:optional true} [:maybe number?]]
    [:updated_at {:optional true} string?] ;; TODO: Date regex
    [:visualization_settings VisualizationSettings]])
 
 ;;; ---------------------------------------- Exported API ----------------------------------------
 (de/define-getters-and-setters Card
-  dataset-query     [:dataset_query]
+  ;; NOTE: Do not use define-getters-and-setters for `dataset-query`; it needs special handling.
   display           [:display]
   display-is-locked [:display-is-locked])
 
@@ -137,9 +172,31 @@
              (->Card js-card)))))))
 
 #?(:cljs
+   (def ^:export query-from-js
+     "Converter for a plain JS object query to a CLJS map.
+     Needs special handling because of the metadata."
+     (let [->DatasetQuery (converters/incoming DatasetQuery)]
+       (fn [^js js-dataset-query js-metadata]
+         (let [database-id (.-database js-dataset-query)]
+           (binding [*metadata-provider* (lib.metadata.frontend/metadata-provider js-metadata database-id)]
+             (->DatasetQuery js-dataset-query)))))))
+
+#?(:cljs
    (def ^:export to-js
      "Converter from CLJS maps to plain JS objects."
      (converters/outgoing Card)))
+
+(mu/defn ^:export with-dataset-query :- Card
+  "Attaches a `:dataset_query` to a `Card`.
+
+  This can't be generated by [[de/define-getters-and-setters]] because the conversion of queries requires special
+  handling."
+  [card :- Card dataset-query :- DatasetQuery]
+  (when-not (map? card)
+    (throw (ex-info "with-dataset-query does not auto-convert; call from-js first" {})))
+  (when-not (map? dataset-query)
+    (throw (ex-info "with-dataset-query does not auto-convert; call query-from-js first" {})))
+  (assoc card :dataset_query dataset-query))
 
 (defn- set-like [inner-schema]
   [:or [:set inner-schema] [:sequential inner-schema]])
@@ -172,16 +229,29 @@
                                        (not should-unlock?))))))
 
 #?(:cljs
-   (def ^:export parameter_values_from_js
+   (def ^:export parameter-values-from-js
      "Converts a ParameterValues object into CLJS data."
      (converters/incoming ParameterValues)))
 
+(defn- trim-card-for-dirty-check [card]
+  (select-keys card [:collection_id :creation-type :dashboard-id :dashcard-id :dataset
+                     :description :display :name :parameters :visualization_settings]))
 
+;; TODO: This inverted "is dirty" logic is a bit confusing - this would feel more natural as an equality check.
+;; However it's probably more convenient
 (mu/defn ^:export is-dirty-compared-to :- boolean?
-  "Given two cards, compare a subset of their properties to see if they're different."
+  "Given two cards, compare a subset of their properties to see if they're different.
+
+  Two cards are considered dirty if:
+  - Their `parameter-values` are different; OR
+  - Their queries are not [[lib.equality/=]]; OR
+  - Their values for a certain subset of fields is different.
+
+  Note that the comparison is symmetric - it doesn't matter which is `card` and which `original-card`."
   [card          :- Card param-values :- ParameterValues
    original-card :- Card original-param-values :- ParameterValues]
   (or (not= param-values original-param-values)
-      (apply not= (for [c [card original-card]]
-                    (select-keys c [:name :description :collection_id :dashboard_id :dashcard_id
-                                    :dataset :dataset_query :display :parameters :visualization_settings])))))
+      ;; Queries require a specialized =, since they contain eg. `:lib/uuid`s that should be ignored.
+      (not (lib.equality/= (:dataset_query card) (:dataset_query original-card)))
+      (not= (trim-card-for-dirty-check card)
+            (trim-card-for-dirty-check original-card))))

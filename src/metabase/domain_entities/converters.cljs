@@ -5,23 +5,18 @@
     [malli.transform :as mtx]))
 
 (defn- decode-map [schema _]
-  (let [by-prop (into {} (for [[map-key props val-schema] (mc/children schema)]
+  (let [by-prop (into {} (for [[map-key props] (mc/children schema)]
                            [(or (get props :js/prop)
                                 (csk/->snake_case_string map-key))
-                            {:map-key   map-key
-                             :drop-nil? (and (:optional props)
-                                             (not (#{'nil? :nil} (mc/type val-schema))))}]))]
+                            {:map-key map-key}]))]
     {:enter (fn [x]
               (cond
                 (map? x) x
                 (object? x)
                 (into {} (for [prop (js/Object.keys x)
                                :let [js-val  (unchecked-get x prop)
-                                     {:keys [map-key drop-nil?]
-                                      :or {map-key (csk/->kebab-case-keyword prop)}} (get by-prop prop)]
-                               ;; If the value is nil, and it's both :optional and not a :maybe,
-                               ;; we just discard the value.
-                               :when (not (and drop-nil? (nil? js-val)))]
+                                     map-key (or (get by-prop prop)
+                                                 (csk/->kebab-case-keyword prop))]]
                            [map-key js-val]))))
      :leave (fn [x]
               (if (object? x)

@@ -113,29 +113,6 @@ export type QuestionCreatorOpts = {
 type CljsCard = unknown & { _opaque: typeof CljsCard };
 declare const CljsCard: unique symbol;
 
-function noBlanks(obj) {
-  if (Array.isArray(obj)) {
-    return obj.map(noBlanks);
-  }
-  if (!obj || typeof obj !== "object") {
-    return obj;
-  }
-
-  const ret = {};
-  for (const k of Object.keys(obj)) {
-    const v = obj[k];
-    if (typeof v !== "undefined" && v !== null) {
-      // Special case: Recursively de-blank dataset_query and dataset_query.query.
-      if (k === "dataset_query" && obj[k].query) {
-        ret[k] = { ...obj[k], query: noBlanks(obj[k].query) };
-      } else {
-        ret[k] = obj[k];
-      }
-    }
-  }
-  return ret;
-}
-
 /**
  * This is a wrapper around a question/card object, which may contain one or more Query objects
  */
@@ -179,8 +156,8 @@ class QuestionInner {
     // The constructor can be passed either the vanilla JS `CardObject` or a CLJS map.
     // This caches whichever representation is passed in.
     // If the other is needed it will be converted lazily; see `card()` and `_cljsCard()`.
-    if (card.constructor === Object) {
-      this._card = card as CardObject;
+    if (!card || card.constructor === Object) {
+      this._card = (card as CardObject) || {};
     } else {
       this._cljsCardCached = card as CljsCard;
     }
@@ -222,9 +199,8 @@ class QuestionInner {
       this._cljsCardCached = C.from_js(this._card, this.metadata());
       // TODO: Remove this dev-time check, eventually. It's a useful debugging aid during this transition.
       const roundTripped = C.to_js(this._cljsCardCached);
-      const deblanked = noBlanks(this._card);
-      if (!_.isEqual(deblanked, roundTripped)) {
-        console.log(deblanked, roundTripped);
+      if (!_.isEqual(this._card, roundTripped)) {
+        console.log(this._card, roundTripped);
         throw new Error(
           "round-tripped Question._card is not the same as the original",
         );
@@ -1329,11 +1305,14 @@ class QuestionInner {
         // if it's saved, then it's dirty when the current card doesn't match the last saved version
         const origCard = C.with_dataset_query(
           originalQuestion._cljsCard(),
-          originalQuestion.query().clean().datasetQuery(),
+          C.query_from_js(
+            originalQuestion.query().clean().datasetQuery(),
+            originalQuestion.metadata(),
+          ),
         );
         const thisCard = C.with_dataset_query(
           this._cljsCard(),
-          this.query().clean().datasetQuery(),
+          C.query_from_js(this.query().clean().datasetQuery(), this.metadata()),
         );
         const thisParams = C.parameter_values_from_js(this._parameterValues);
         const origParams = C.parameter_values_from_js(
@@ -1347,12 +1326,47 @@ class QuestionInner {
         );
       }
     })();
-    if (!window._dirtyChecks) {
-      window._dirtyChecks = [];
+
+    // TODO: Remove this debugging check as our transition to CLJS progresses.
+    const legacyResult = this._legacyIsDirtyComparedTo(originalQuestion);
+    if (legacyResult !== ret) {
+      console.log(
+        this,
+        originalQuestion,
+        "dirty: legacy",
+        legacyResult,
+        "cljs",
+        ret,
+      );
+      throw new Error(
+        "isDirtyComparedTo divergence: legacy " +
+          legacyResult +
+          ", cljs " +
+          ret,
+      );
     }
-    window._dirtyChecks.push([this.card(), originalQuestion.card(), ret]);
-    console.log(window._dirtyChecks);
+
     return ret;
+  }
+
+  private _legacyIsDirtyComparedTo(originalQuestion: Question) {
+    if (!this.isSaved() && this.canRun() && originalQuestion == null) {
+      // if it's new, then it's dirty if it is runnable
+      return true;
+    } else {
+      // if it's saved, then it's dirty when the current card doesn't match the last saved version
+      const origCardSerialized =
+        originalQuestion &&
+        originalQuestion._serializeForUrl({
+          includeOriginalCardId: false,
+        });
+
+      const currentCardSerialized = this._serializeForUrl({
+        includeOriginalCardId: false,
+      });
+
+      return currentCardSerialized !== origCardSerialized;
+    }
   }
 
   isDirtyComparedToWithoutParameters(originalQuestion: Question) {
