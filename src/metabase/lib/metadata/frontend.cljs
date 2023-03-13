@@ -8,7 +8,7 @@
   "Given an instance of the TypeScript `Metadata` class and the database ID, return a
   [[lib.metadata.protocols/DatabaseMetadataProvider]] for that database."
   [^js js-metadata database-id]
-  (let [^js js-database (.database js-metadata database-id)]
+  (let [^js js-database (when js-metadata (.database js-metadata database-id))]
     (reify
       lib.metadata.protocols/DatabaseMetadataProvider
       (database [_]
