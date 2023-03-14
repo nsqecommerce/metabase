@@ -100,60 +100,61 @@
 
 (def Card
   "Malli schema for a possibly-saved Card."
-  [:map
-   [:archived {:optional true} boolean?]
-   [:average_query_time {:optional true} number?]
-   [:cache-ttl {:optional true} [:maybe number?]]
-   [:can_write {:optional true} boolean?]
-   [:collection {:optional true} :any]
-   [:collection_id [:maybe number?]]
-   [:collection_position [:maybe number?]]
-   [:collection_preview boolean?]
-   [:created_at [:maybe string?]] ;; TODO: Date regex?
-   [:creator {:optional true}
-    [:map
-     [:id number?]
-     [:common_name string?]
-     [:date_joined string?] ;; TODO: Date regex
-     [:email string?]
-     [:first_name  [:maybe string?]]
-     [:is_qbnewb boolean?]
-     [:is_superuser boolean?]
-     [:last_login string?] ;; TODO: Date regex
-     [:last_name   [:maybe string?]]]]
-   [:creator_id {:optional true} number?]
-   [:creation-type {:optional true :js/prop "creationType"} string?]
-   [:dashboard_count {:optional true} number?]
-   [:dashboard-id {:optional true :js/prop "dashboardId"} number?]
-   [:dashcard-id  {:optional true :js/prop "dashcardId"}  number?]
-   [:database_id {:optional true} number?]
-   [:dataset {:optional true} boolean?]
-   [:dataset_query DatasetQuery]
-   [:description [:maybe string?]]
-   ;; TODO: Display is really an enum but I don't know all its values.
-   ;; Known values: table, scalar, gauge, map, area, bar, line. There are more missing for sure.
-   [:display string?]
-   [:display-is-locked {:optional true :js/prop "displayIsLocked"} boolean?]
-   [:embedding_params {:optional true} :any]
-   [:enable_embedding {:optional true} boolean?]
-   [:entity_id {:optional true} string?]
-   [:id {:optional true} [:or number? string?]]
-   [:last-edit-info {:optional true :js/prop "last-edit-info"} :any]
-   [:last-query-start {:optional true} :any]
-   [:made_public_by_id {:optional true} [:maybe number?]]
-   [:moderation_reviews {:optional true} [:vector :any]]
-   [:name {:optional true} string?]
-   [:original_card_id {:optional true} number?]
-   [:parameter_mappings {:optional true} [:vector :any]]
-   [:parameter_usage_count {:optional true} number?]
-   [:parameters {:optional true} [:sequential Parameter]]
-   [:persisted {:optional true} boolean?]
-   [:public_uuid {:optional true} [:maybe string?]]
-   [:query_type {:optional true} string?] ;; TODO: Probably an enum
-   [:result_metadata {:optional true} :any]
-   [:table_id {:optional true} [:maybe number?]]
-   [:updated_at {:optional true} string?] ;; TODO: Date regex
-   [:visualization_settings VisualizationSettings]])
+  [:schema
+   [:map
+    [:archived {:optional true} boolean?]
+    [:average_query_time {:optional true} number?]
+    [:cache-ttl {:optional true} [:maybe number?]]
+    [:can_write {:optional true} boolean?]
+    [:collection {:optional true} :any]
+    [:collection_id [:maybe number?]]
+    [:collection_position [:maybe number?]]
+    [:collection_preview boolean?]
+    [:created_at [:maybe string?]] ;; TODO: Date regex?
+    [:creator {:optional true}
+     [:map
+      [:id number?]
+      [:common_name string?]
+      [:date_joined string?] ;; TODO: Date regex
+      [:email string?]
+      [:first_name  [:maybe string?]]
+      [:is_qbnewb boolean?]
+      [:is_superuser boolean?]
+      [:last_login string?] ;; TODO: Date regex
+      [:last_name   [:maybe string?]]]]
+    [:creator_id {:optional true} number?]
+    [:creation-type {:optional true :js/prop "creationType"} string?]
+    [:dashboard_count {:optional true} number?]
+    [:dashboard-id {:optional true :js/prop "dashboardId"} number?]
+    [:dashcard-id  {:optional true :js/prop "dashcardId"}  number?]
+    [:database_id {:optional true} number?]
+    [:dataset {:optional true} boolean?]
+    [:dataset_query DatasetQuery]
+    [:description [:maybe string?]]
+    ;; TODO: Display is really an enum but I don't know all its values.
+    ;; Known values: table, scalar, gauge, map, area, bar, line. There are more missing for sure.
+    [:display string?]
+    [:display-is-locked {:optional true :js/prop "displayIsLocked"} boolean?]
+    [:embedding_params {:optional true} :any]
+    [:enable_embedding {:optional true} boolean?]
+    [:entity_id {:optional true} string?]
+    [:id {:optional true} [:or number? string?]]
+    [:last-edit-info {:optional true :js/prop "last-edit-info"} :any]
+    [:last-query-start {:optional true} :any]
+    [:made_public_by_id {:optional true} [:maybe number?]]
+    [:moderation_reviews {:optional true} [:vector :any]]
+    [:name {:optional true} string?]
+    [:original_card_id {:optional true} number?]
+    [:parameter_mappings {:optional true} [:vector :any]]
+    [:parameter_usage_count {:optional true} number?]
+    [:parameters {:optional true} [:sequential Parameter]]
+    [:persisted {:optional true} boolean?]
+    [:public_uuid {:optional true} [:maybe string?]]
+    [:query_type {:optional true} string?] ;; TODO: Probably an enum
+    [:result_metadata {:optional true} :any]
+    [:table_id {:optional true} [:maybe number?]]
+    [:updated_at {:optional true} string?] ;; TODO: Date regex
+    [:visualization_settings VisualizationSettings]]])
 
 ;;; ---------------------------------------- Exported API ----------------------------------------
 (de/define-getters-and-setters Card
@@ -199,7 +200,7 @@
   (assoc card :dataset_query dataset-query))
 
 (defn- set-like [inner-schema]
-  [:or [:set inner-schema] [:sequential inner-schema]])
+  [:schema [:or [:set inner-schema] [:sequential inner-schema]]])
 
 (mu/defn ^:export maybe-unlock-display :- Card
   "Given current and previous sets of \"sensible\" display settings, check which of them the current `:display` setting
@@ -234,11 +235,13 @@
      (converters/incoming ParameterValues)))
 
 (defn- trim-card-for-dirty-check [card]
-  (select-keys card [:collection_id :creation-type :dashboard-id :dashcard-id :dataset
-                     :description :display :name :parameters :visualization_settings]))
+  (-> card
+      (select-keys [:collection_id :creation-type :dashboard-id :dashcard-id :dataset
+                    :description :display :name :parameters :visualization_settings])
+      (update :parameters #(or % []))))
 
 ;; TODO: This inverted "is dirty" logic is a bit confusing - this would feel more natural as an equality check.
-;; However it's probably more convenient
+;; However it seems more convenient for the transition to keep the names and logic the same.
 (mu/defn ^:export is-dirty-compared-to :- boolean?
   "Given two cards, compare a subset of their properties to see if they're different.
 

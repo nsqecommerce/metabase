@@ -199,8 +199,15 @@ class QuestionInner {
       this._cljsCardCached = C.from_js(this._card, this.metadata());
       // TODO: Remove this dev-time check, eventually. It's a useful debugging aid during this transition.
       const roundTripped = C.to_js(this._cljsCardCached);
-      if (!_.isEqual(this._card, roundTripped)) {
-        console.log(this._card, roundTripped);
+      // Slightly massage the JS card to match a few details of the CLJS transition.
+      const originalCard = {
+        ...this._card,
+        ...("parameters" in this._card
+          ? { parameters: this._card.parameters || [] }
+          : undefined),
+      };
+      if (!_.isEqual(originalCard, roundTripped)) {
+        console.log(originalCard, roundTripped);
         throw new Error(
           "round-tripped Question._card is not the same as the original",
         );

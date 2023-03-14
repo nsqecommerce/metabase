@@ -58,7 +58,7 @@
    (native-query database-metadata-provider nil inner-query))
 
   ([database-metadata-provider :- lib.metadata/DatabaseMetadataProvider
-    results-metadata           :- lib.metadata/StageMetadata
+    results-metadata           :- [:maybe lib.metadata/StageMetadata]
     inner-query]
    (query-with-stages database-metadata-provider
                       [(-> {:lib/type           :mbql.stage/native

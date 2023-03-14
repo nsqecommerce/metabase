@@ -15,7 +15,7 @@
                 (object? x)
                 (into {} (for [prop (js/Object.keys x)
                                :let [js-val  (unchecked-get x prop)
-                                     map-key (or (get by-prop prop)
+                                     map-key (or (get-in by-prop [prop :map-key])
                                                  (csk/->kebab-case-keyword prop))]]
                            [map-key js-val]))))
      :leave (fn [x]
