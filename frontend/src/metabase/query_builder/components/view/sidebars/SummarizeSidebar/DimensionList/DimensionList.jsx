@@ -44,7 +44,9 @@ export const DimensionList = ({
   const isDimensionSelected = dimension =>
     dimensions.some(d => {
       // sometimes `dimension` has a join-alias and `d` doesn't -- with/without is equivalent in this scenario
-      return d.isSameBaseDimension(dimension.withoutJoinAlias());
+      return d
+        .withoutJoinAlias()
+        .isSameBaseDimension(dimension.withoutJoinAlias());
     });
 
   const [filter, setFilter] = useState("");
